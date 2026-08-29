@@ -123,6 +123,7 @@ static std::string generate_greedy(
 int main(int argc, char ** argv) {
     std::string model_path;
     std::string engram_path;
+    std::string lora_path;
     std::string eval_path;
     std::string gen_prompt;
     int n_predict = 24;
@@ -132,6 +133,7 @@ int main(int argc, char ** argv) {
         std::string arg = argv[i];
         if (arg == "-m" && i + 1 < argc) { model_path = argv[++i]; }
         else if (arg == "--engram" && i + 1 < argc) { engram_path = argv[++i]; }
+        else if (arg == "--lora" && i + 1 < argc) { lora_path = argv[++i]; }
         else if (arg == "--eval" && i + 1 < argc) { eval_path = argv[++i]; }
         else if (arg == "--generate" && i + 1 < argc) { gen_prompt = argv[++i]; }
         else if (arg == "--n-predict" && i + 1 < argc) { n_predict = atoi(argv[++i]); }
@@ -180,6 +182,15 @@ int main(int argc, char ** argv) {
     cparams.n_threads_batch = n_threads;
     llama_context * ctx = llama_init_from_model(model, cparams);
     if (!ctx) { return 1; }
+
+    llama_adapter_lora * lora = nullptr;
+    if (!lora_path.empty()) {
+        lora = llama_adapter_lora_init(model, lora_path.c_str());
+        if (!lora) { return 1; }
+        float scale = 1.0f;
+        llama_set_adapters_lora(ctx, &lora, 1, &scale);
+        fprintf(stderr, "lora applied: %s\n", lora_path.c_str());
+    }
 
     llama_engram * engram = nullptr;
     if (!engram_path.empty()) {
