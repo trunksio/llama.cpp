@@ -12,6 +12,7 @@ add_library(llama
             ../include/llama.h
             llama.cpp
             llama-adapter.cpp
+            llama-engram.cpp
             llama-arch.cpp
             llama-batch.cpp
             llama-chat.cpp
