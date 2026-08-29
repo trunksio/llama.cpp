@@ -11,6 +11,7 @@ file(GLOB LLAMA_MODELS_SOURCES "models/*.cpp")
 set(LLAMA_CORE_SOURCES
     llama.cpp
     llama-adapter.cpp
+    llama-engram.cpp
     llama-arch.cpp
     llama-batch.cpp
     llama-chat.cpp

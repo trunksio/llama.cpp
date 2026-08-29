@@ -83,6 +83,8 @@ enum llm_norm_type {
 };
 
 // TODO: tmp - need something better to pass the data from the encoder to the decoder
+struct llama_engram;
+
 struct llama_cross {
     // the output embeddings from the encoder as a ggml tensor
     // TODO: this needs more work to be correct, for now copy the embeddings data to host memory
@@ -803,6 +805,7 @@ struct llm_graph_params {
 
     const llama_adapter_cvec     * cvec;
     const llama_adapter_loras    * loras;
+    const llama_engram           * engram;
     const llama_memory_context_i * mctx;
     const llama_cross            * cross;
     const llama_moe_cache        * moe_cache;
@@ -904,9 +907,10 @@ struct llm_graph_params {
             cparams.causal_attn             == other.cparams.causal_attn             &&
             arch  == other.arch  &&
             gtype == other.gtype &&
-            cvec  == other.cvec  &&
-            loras == other.loras &&
-            cross == other.cross;
+            cvec   == other.cvec   &&
+            loras  == other.loras  &&
+            engram == other.engram &&
+            cross  == other.cross;
     }
 };
 
@@ -1061,6 +1065,7 @@ struct llm_graph_context {
 
     const llama_adapter_cvec     * cvec;
     const llama_adapter_loras    * loras;
+    const llama_engram           * engram;
     const llama_memory_context_i * mctx;
     const llama_cross            * cross;
     const llama_moe_cache        * moe_cache;
