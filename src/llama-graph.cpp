@@ -1,5 +1,7 @@
 #include "llama-graph.h"
 
+#include "llama-engram.h"
+
 #include "llama-impl.h"
 #include "llama-model.h"
 #include "llama-batch.h"
@@ -1355,6 +1357,7 @@ llm_graph_context::llm_graph_context(const llm_graph_params & params) :
     backend_cpu      (params.backend_cpu),
     cvec             (params.cvec),
     loras            (params.loras),
+    engram           (params.engram),
     mctx             (params.mctx),
     cross            (params.cross),
     samplers         (params.samplers),
@@ -1376,7 +1379,26 @@ void llm_graph_context::cb(ggml_tensor * cur, const char * name, int il) const {
 ggml_tensor * llm_graph_context::build_cvec(
          ggml_tensor * cur,
                  int   il) const {
-    return cvec->apply_to(ctx0, cur, il);
+    cur = cvec->apply_to(ctx0, cur, il);
+
+    if (engram && il == engram->config.injection_layer) {
+        auto inp = std::make_unique<llm_graph_input_engram>(engram);
+
+        inp->t_idx = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32,
+                (int64_t) n_tokens * engram->config.total_heads());
+        ggml_set_input(inp->t_idx);
+
+        inp->t_valid = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32,
+                (int64_t) n_tokens * engram->config.n_orders());
+        ggml_set_input(inp->t_valid);
+
+        cur = llama_engram_apply(ctx0, engram, cur, inp->t_idx, inp->t_valid);
+        cb(cur, "engram_out", il);
+
+        res->add_input(std::move(inp));
+    }
+
+    return cur;
 }
 
 ggml_tensor * llm_graph_context::build_lora_mm(

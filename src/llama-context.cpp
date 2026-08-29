@@ -1,5 +1,7 @@
 #include "llama-context.h"
 
+#include "llama-engram.h"
+
 #include "ggml.h"
 #include "llama-arch.h"
 #include "llama-graph.h"
@@ -2426,6 +2428,7 @@ llm_graph_params llama_context::graph_params(
         /*.backend_cpu =*/ backend_cpu,
         /*.cvec        =*/ cvec.get(),
         /*.loras       =*/ loras.get(),
+        /*.engram      =*/ engram,
         /*.mctx        =*/ mctx,
         /*.cross       =*/ &cross,
         /*.samplers    =*/ sampling.samplers,
@@ -3822,6 +3825,17 @@ int32_t llama_set_adapters_lora(
 
     ctx->set_adapters_lora(adapters, n_adapters, scales);
 
+    return 0;
+}
+
+void llama_context::set_engram(const llama_engram * engram) {
+    this->engram = engram;
+}
+
+int32_t llama_set_engram(
+        llama_context * ctx,
+        llama_engram  * engram) {
+    ctx->set_engram(engram);
     return 0;
 }
 
