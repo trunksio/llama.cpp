@@ -83,6 +83,11 @@ struct server_context {
     // get a new response reader, used by CLI application
     server_response_reader get_response_reader();
 
+    // drop all cached KV state and cached prompts; used when a context-level
+    // adapter (e.g. an engram) is mounted or unmounted so no state computed
+    // under the previous adapter can be reused
+    void clear_kv_cache();
+
     // get server metadata (read-only), can only be called after load_model()
     // not thread-safe, should only be used from the main thread
     server_context_meta get_meta() const;

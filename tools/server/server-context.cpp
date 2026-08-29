@@ -5212,6 +5212,17 @@ llama_context * server_context::get_llama_context() const {
     return impl->ctx_tgt;
 }
 
+void server_context::clear_kv_cache() {
+    for (auto & slot : impl->slots) {
+        if (!slot.is_processing()) {
+            slot.prompt_clear(false);
+        }
+    }
+    if (impl->prompt_cache) {
+        impl->prompt_cache->states.clear();
+    }
+}
+
 server_response_reader server_context::get_response_reader() {
     return impl->get_response_reader();
 }
