@@ -79,10 +79,53 @@ static double score_candidate(
     return total / (double) cont_ids.size();
 }
 
+// greedy token-by-token generation: exercises the incremental-decode path,
+// where the engram hashes each new token against its per-sequence history
+static std::string generate_greedy(
+        llama_context * ctx,
+        const llama_vocab * vocab,
+        const std::string & prompt,
+        int n_predict) {
+    llama_memory_clear(llama_get_memory(ctx), true);
+
+    std::vector<llama_token> ids = common_tokenize(vocab, prompt, false, false);
+    llama_batch batch = llama_batch_init((int32_t) std::max<size_t>(ids.size(), 1), 0, 1);
+    for (size_t i = 0; i < ids.size(); ++i) {
+        common_batch_add(batch, ids[i], (llama_pos) i, {0}, i + 1 == ids.size());
+    }
+    if (llama_decode(ctx, batch) != 0) {
+        llama_batch_free(batch);
+        return "<decode failed>";
+    }
+
+    std::string out;
+    llama_pos pos = (llama_pos) ids.size();
+    int logits_idx = (int) ids.size() - 1;
+    for (int step = 0; step < n_predict; ++step) {
+        const float * logits = llama_get_logits_ith(ctx, logits_idx);
+        const int n_vocab = llama_vocab_n_tokens(vocab);
+        llama_token best = 0;
+        for (int v = 1; v < n_vocab; ++v) {
+            if (logits[v] > logits[best]) best = v;
+        }
+        if (llama_vocab_is_eog(vocab, best)) break;
+        out += common_token_to_piece(ctx, best);
+
+        common_batch_clear(batch);
+        common_batch_add(batch, best, pos++, {0}, true);
+        if (llama_decode(ctx, batch) != 0) break;
+        logits_idx = 0;
+    }
+    llama_batch_free(batch);
+    return out;
+}
+
 int main(int argc, char ** argv) {
     std::string model_path;
     std::string engram_path;
     std::string eval_path;
+    std::string gen_prompt;
+    int n_predict = 24;
     int n_threads = 20;
 
     for (int i = 1; i < argc; ++i) {
@@ -90,19 +133,22 @@ int main(int argc, char ** argv) {
         if (arg == "-m" && i + 1 < argc) { model_path = argv[++i]; }
         else if (arg == "--engram" && i + 1 < argc) { engram_path = argv[++i]; }
         else if (arg == "--eval" && i + 1 < argc) { eval_path = argv[++i]; }
+        else if (arg == "--generate" && i + 1 < argc) { gen_prompt = argv[++i]; }
+        else if (arg == "--n-predict" && i + 1 < argc) { n_predict = atoi(argv[++i]); }
         else if (arg == "-t" && i + 1 < argc) { n_threads = atoi(argv[++i]); }
         else {
-            fprintf(stderr, "usage: %s -m model.gguf --eval rows.tsv [--engram engram.gguf] [-t threads]\n", argv[0]);
+            fprintf(stderr, "usage: %s -m model.gguf (--eval rows.tsv | --generate PROMPT) "
+                    "[--engram engram.gguf] [--n-predict N] [-t threads]\n", argv[0]);
             return 1;
         }
     }
-    if (model_path.empty() || eval_path.empty()) {
-        fprintf(stderr, "model and eval paths are required\n");
+    if (model_path.empty() || (eval_path.empty() && gen_prompt.empty())) {
+        fprintf(stderr, "model path and either --eval or --generate are required\n");
         return 1;
     }
 
     std::vector<eval_row> rows;
-    {
+    if (!eval_path.empty()) {
         std::ifstream file(eval_path);
         std::string line;
         while (std::getline(file, line)) {
@@ -142,6 +188,19 @@ int main(int argc, char ** argv) {
         if (!engram) { return 1; }
         llama_set_engram(ctx, engram);
         fprintf(stderr, "engram mounted in %.1f ms\n", (ggml_time_us() - t0) / 1000.0);
+    }
+
+    if (!gen_prompt.empty()) {
+        const std::string completion = generate_greedy(ctx, vocab, gen_prompt, n_predict);
+        printf("prompt: %s\ncompletion:%s\n%s\n", gen_prompt.c_str(), completion.c_str(),
+                engram ? "[engram on]" : "[engram off]");
+        if (rows.empty()) {
+            if (engram) { llama_set_engram(ctx, nullptr); llama_engram_free(engram); }
+            llama_free(ctx);
+            llama_model_free(model);
+            llama_backend_free();
+            return 0;
+        }
     }
 
     int correct = 0;
