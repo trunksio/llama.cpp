@@ -686,6 +686,27 @@ extern "C" {
     // mount (or unmount with NULL) an engram on a context; the base model is untouched
     LLAMA_API int32_t llama_set_engram(struct llama_context * ctx, struct llama_engram * engram);
 
+    // engram confidence signal: L2 norm of the engram's injected residual,
+    // accumulated per token over every decode since the last reset (mounting
+    // resets it). Any output pointer may be NULL; reset=true clears it.
+    LLAMA_API void llama_engram_signal(
+            struct llama_context * ctx,
+                           float * out_mean,
+                           float * out_max,
+                         int32_t * out_count,
+                            bool   reset);
+
+    // per-position provenance trace: copies up to max_positions most-recent
+    // rows of (*out_stride) floats — one injection norm per n-gram order
+    // plus the full-residual norm last. A stored key fires the high orders
+    // (their windows contain the entity tokens); a shared-suffix false fire
+    // lights only the lowest order. Returns the number of positions copied.
+    LLAMA_API int32_t llama_engram_signal_trace(
+            struct llama_context * ctx,
+                           float * out,
+                         int32_t   max_positions,
+                         int32_t * out_stride);
+
     // Get the invocation tokens if the current lora is an alora
     LLAMA_API uint64_t            llama_adapter_get_alora_n_invocation_tokens(const struct llama_adapter_lora * adapter);
     LLAMA_API const llama_token * llama_adapter_get_alora_invocation_tokens  (const struct llama_adapter_lora * adapter);

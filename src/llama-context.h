@@ -124,6 +124,14 @@ struct llama_context {
 
     void set_engram(const llama_engram * engram);
 
+    // engram confidence signal: per-token injection norms accumulated over
+    // every decode since the last reset
+    void engram_signal(float * out_mean, float * out_max, int32_t * out_count, bool reset);
+
+    // copy up to max_positions most-recent per-position norm rows (stride
+    // floats each: one per order + the total); returns positions copied
+    int32_t engram_signal_trace(float * out, int32_t max_positions, int32_t * out_stride);
+
     bool set_adapter_cvec(
             const float * data,
                  size_t   len,
@@ -282,6 +290,14 @@ private:
     llama_adapter_loras_ptr loras;
 
     const llama_engram * engram = nullptr;
+
+    // engram confidence-signal accumulator (see engram_signal)
+    double  engram_sig_sum    = 0.0;
+    float   engram_sig_max    = 0.0f;
+    int32_t engram_sig_count  = 0;
+    int32_t engram_sig_stride = 0;
+    std::vector<float> engram_sig_buf;
+    std::vector<float> engram_sig_trace; // per-position rows, most recent last
 
     llama_cross cross; // TODO: tmp for handling cross-attention - need something better probably
 
