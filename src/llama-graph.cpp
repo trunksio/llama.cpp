@@ -1412,6 +1412,7 @@ void llm_graph_result::reset() {
     t_embd        = nullptr;
     t_embd_pooled = nullptr;
     t_h_nextn     = nullptr;
+    t_engram_norm = nullptr;
 
     t_layer_inp.resize(LLAMA_MAX_LAYERS + 1);
     std::fill(t_layer_inp.begin(), t_layer_inp.end(), nullptr);
@@ -1621,8 +1622,13 @@ ggml_tensor * llm_graph_context::build_cvec(
                 (int64_t) n_tokens * engram->config.n_orders());
         ggml_set_input(inp->t_valid);
 
-        cur = llama_engram_apply(ctx0, engram, cur, inp->t_idx, inp->t_valid);
+        ggml_tensor * norm2 = nullptr;
+        cur = llama_engram_apply(ctx0, engram, cur, inp->t_idx, inp->t_valid, &norm2);
         cb(cur, "engram_out", il);
+
+        ggml_set_output(norm2);
+        ggml_build_forward_expand(gf, norm2);
+        res->t_engram_norm = norm2;
 
         res->add_input(std::move(inp));
     }

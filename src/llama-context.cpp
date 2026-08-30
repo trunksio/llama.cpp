@@ -2069,6 +2069,38 @@ int llama_context::decode(const llama_batch_ext & batch_inp) {
             t_embd = res->get_embd_pooled();
         }
 
+        // accumulate the engram confidence signal for this ubatch
+        if (engram && res->t_engram_norm) {
+            auto * t_sig = res->t_engram_norm;
+            const int64_t stride = t_sig->ne[0]; // n_orders + 1
+            const int64_t n_pos  = t_sig->ne[1];
+            const int64_t n_sig  = stride*n_pos;
+            engram_sig_buf.resize(n_sig);
+            ggml_backend_t backend_sig = ggml_backend_sched_get_tensor_backend(sched.get(), t_sig);
+            GGML_ASSERT(backend_sig != nullptr);
+            ggml_backend_tensor_get_async(backend_sig, t_sig, engram_sig_buf.data(), 0, n_sig*sizeof(float));
+            ggml_backend_sched_synchronize(sched.get());
+            engram_sig_stride = (int32_t) stride;
+            for (int64_t p = 0; p < n_pos; ++p) {
+                for (int64_t o = 0; o < stride; ++o) {
+                    const float v = sqrtf(std::max(0.0f, engram_sig_buf[p*stride + o]));
+                    engram_sig_trace.push_back(v);
+                    if (o == stride - 1) { // the full-residual norm
+                        engram_sig_sum += v;
+                        engram_sig_max  = std::max(engram_sig_max, v);
+                        engram_sig_count++;
+                    }
+                }
+            }
+            // cap the trace at the most recent 512 positions
+            const size_t cap = (size_t) 512*stride;
+            if (engram_sig_trace.size() > cap) {
+                engram_sig_trace.erase(
+                        engram_sig_trace.begin(),
+                        engram_sig_trace.end() - cap);
+            }
+        }
+
         // extract logits
         if (logits.data && t_logits && n_outputs > 0 && needs_raw_logits(ubatch, sampling.samplers)) {
             ggml_backend_t backend_res = ggml_backend_sched_get_tensor_backend(sched.get(), t_logits);
@@ -4394,6 +4426,41 @@ int32_t llama_set_adapters_lora(
 
 void llama_context::set_engram(const llama_engram * engram) {
     this->engram = engram;
+    // a different memory means the old signal is meaningless
+    engram_signal(nullptr, nullptr, nullptr, true);
+}
+
+void llama_context::engram_signal(float * out_mean, float * out_max, int32_t * out_count, bool reset) {
+    if (out_mean) {
+        *out_mean = engram_sig_count > 0 ? (float) (engram_sig_sum / engram_sig_count) : 0.0f;
+    }
+    if (out_max) {
+        *out_max = engram_sig_max;
+    }
+    if (out_count) {
+        *out_count = engram_sig_count;
+    }
+    if (reset) {
+        engram_sig_sum   = 0.0;
+        engram_sig_max   = 0.0f;
+        engram_sig_count = 0;
+        engram_sig_trace.clear();
+    }
+}
+
+int32_t llama_context::engram_signal_trace(float * out, int32_t max_positions, int32_t * out_stride) {
+    const int32_t stride = engram_sig_stride > 0 ? engram_sig_stride : 1;
+    if (out_stride) {
+        *out_stride = stride;
+    }
+    if (!out || max_positions <= 0 || engram_sig_trace.empty()) {
+        return 0;
+    }
+    const int32_t have = (int32_t) (engram_sig_trace.size() / stride);
+    const int32_t n    = std::min(max_positions, have);
+    const float * src  = engram_sig_trace.data() + (size_t) (have - n)*stride;
+    std::memcpy(out, src, (size_t) n*stride*sizeof(float));
+    return n;
 }
 
 int32_t llama_set_engram(
@@ -4401,6 +4468,23 @@ int32_t llama_set_engram(
         llama_engram  * engram) {
     ctx->set_engram(engram);
     return 0;
+}
+
+void llama_engram_signal(
+        llama_context * ctx,
+                float * out_mean,
+                float * out_max,
+              int32_t * out_count,
+                 bool   reset) {
+    ctx->engram_signal(out_mean, out_max, out_count, reset);
+}
+
+int32_t llama_engram_signal_trace(
+        llama_context * ctx,
+                float * out,
+              int32_t   max_positions,
+              int32_t * out_stride) {
+    return ctx->engram_signal_trace(out, max_positions, out_stride);
 }
 
 int32_t llama_set_adapter_cvec(
