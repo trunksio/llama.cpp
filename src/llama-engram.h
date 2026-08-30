@@ -76,12 +76,18 @@ public:
 };
 
 // build the gated residual on top of cur ([n_embd, n_tokens]) using the
-// prepared input tensors; returns the enhanced hidden states
+// prepared input tensors; returns the enhanced hidden states. If out_norm2
+// is non-null it receives a [n_orders+1, n_tokens] F32 tensor: rows
+// 0..n_orders-1 hold each order's squared contribution norm per token and
+// the last row the squared norm of the full injected residual — the raw
+// confidence signal that separates "the memory answered" from "the base
+// model guessed" (a shared-suffix false fire lights only the low orders).
 ggml_tensor * llama_engram_apply(
         ggml_context * ctx0,
         const llama_engram * engram,
         ggml_tensor * cur,
         ggml_tensor * t_idx,
-        ggml_tensor * t_valid);
+        ggml_tensor * t_valid,
+        ggml_tensor ** out_norm2);
 
 llama_engram * llama_engram_init_impl(const char * path);

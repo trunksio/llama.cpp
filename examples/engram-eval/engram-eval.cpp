@@ -85,7 +85,8 @@ static std::string generate_greedy(
         llama_context * ctx,
         const llama_vocab * vocab,
         const std::string & prompt,
-        int n_predict) {
+        int n_predict,
+        bool trace_signal = false) {
     llama_memory_clear(llama_get_memory(ctx), true);
 
     std::vector<llama_token> ids = common_tokenize(vocab, prompt, false, false);
@@ -93,9 +94,18 @@ static std::string generate_greedy(
     for (size_t i = 0; i < ids.size(); ++i) {
         common_batch_add(batch, ids[i], (llama_pos) i, {0}, i + 1 == ids.size());
     }
+    llama_engram_signal(ctx, nullptr, nullptr, nullptr, true);
     if (llama_decode(ctx, batch) != 0) {
         llama_batch_free(batch);
         return "<decode failed>";
+    }
+    if (trace_signal) {
+        float row[16]; int32_t stride = 0;
+        if (llama_engram_signal_trace(ctx, row, 1, &stride) == 1) {
+            fprintf(stderr, "signal last-prompt-pos:");
+            for (int32_t o = 0; o < stride - 1; ++o) fprintf(stderr, " o%d=%.3f", o, row[o]);
+            fprintf(stderr, " total=%.3f\n", row[stride - 1]);
+        }
     }
 
     std::string out;
@@ -114,6 +124,15 @@ static std::string generate_greedy(
         common_batch_clear(batch);
         common_batch_add(batch, best, pos++, {0}, true);
         if (llama_decode(ctx, batch) != 0) break;
+        if (trace_signal) {
+            float row[16]; int32_t stride = 0;
+            if (llama_engram_signal_trace(ctx, row, 1, &stride) == 1) {
+                std::string piece = common_token_to_piece(ctx, best);
+                fprintf(stderr, "signal step %2d '%s':", step, piece.c_str());
+                for (int32_t o = 0; o < stride - 1; ++o) fprintf(stderr, " o%d=%.3f", o, row[o]);
+                fprintf(stderr, " total=%.3f\n", row[stride - 1]);
+            }
+        }
         logits_idx = 0;
     }
     llama_batch_free(batch);
@@ -202,7 +221,15 @@ int main(int argc, char ** argv) {
     }
 
     if (!gen_prompt.empty()) {
-        const std::string completion = generate_greedy(ctx, vocab, gen_prompt, n_predict);
+        llama_engram_signal(ctx, nullptr, nullptr, nullptr, true);
+        const std::string completion = generate_greedy(ctx, vocab, gen_prompt, n_predict, engram != nullptr);
+        if (engram) {
+            float sig_mean = 0.0f, sig_max = 0.0f;
+            int32_t sig_count = 0;
+            llama_engram_signal(ctx, &sig_mean, &sig_max, &sig_count, false);
+            printf("engram signal: mean=%.4f max=%.4f over %d tokens\n",
+                    sig_mean, sig_max, sig_count);
+        }
         printf("prompt: %s\ncompletion:%s\n%s\n", gen_prompt.c_str(), completion.c_str(),
                 engram ? "[engram on]" : "[engram off]");
         if (rows.empty()) {

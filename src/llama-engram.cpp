@@ -119,7 +119,8 @@ ggml_tensor * llama_engram_apply(
         const llama_engram * engram,
         ggml_tensor * cur,
         ggml_tensor * t_idx,
-        ggml_tensor * t_valid) {
+        ggml_tensor * t_valid,
+        ggml_tensor ** out_norm2) {
     const auto & cfg = engram->config;
 
     const int64_t n_tokens = cur->ne[1];
@@ -127,6 +128,7 @@ ggml_tensor * llama_engram_apply(
 
     ggml_tensor * cur_f32 = ggml_cast(ctx0, cur, GGML_TYPE_F32);
     ggml_tensor * total = nullptr;
+    ggml_tensor * norms = nullptr; // [n_orders, n_tokens], squared per-order contribution norms
 
     for (uint32_t oi = 0; oi < cfg.n_orders(); ++oi) {
         ggml_tensor * candidate = nullptr;
@@ -159,9 +161,29 @@ ggml_tensor * llama_engram_apply(
         ggml_tensor * contrib = ggml_mul(ctx0, value, gate);
 
         total = total ? ggml_add(ctx0, total, contrib) : contrib;
+
+        if (out_norm2) {
+            // squared norm of this order's contribution (at deployed scale)
+            ggml_tensor * n2 = ggml_sum_rows(ctx0, ggml_sqr(ctx0, contrib)); // [1, n_tokens]
+            n2 = ggml_scale(ctx0, n2, cfg.residual_scale * cfg.residual_scale);
+            norms = norms ? ggml_concat(ctx0, norms, n2, 0) : n2;
+        }
     }
 
     total = ggml_scale(ctx0, total, cfg.residual_scale);
+
+    if (out_norm2) {
+        // rows 0..n_orders-1: per-order squared norms; row n_orders: squared
+        // norm of the full injected residual. The per-order rows carry the
+        // provenance information: a stored key fires the high orders (their
+        // windows contain the entity tokens) while a shared-furniture false
+        // fire lights up only the lowest order.
+        ggml_tensor * tot2 = ggml_sum_rows(ctx0, ggml_sqr(ctx0, total)); // [1, n_tokens]
+        // [n_orders+1, n_tokens]: element (o, t) is order o's squared norm at
+        // token t, with the full-residual squared norm as the final row
+        *out_norm2 = ggml_cont(ctx0, ggml_concat(ctx0, norms, tot2, 0));
+    }
+
     total = ggml_cast(ctx0, total, cur->type);
 
     return ggml_add(ctx0, cur, total);
