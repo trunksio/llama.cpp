@@ -5215,7 +5215,7 @@ llama_context * server_context::get_llama_context() const {
 void server_context::clear_kv_cache() {
     for (auto & slot : impl->slots) {
         if (!slot.is_processing()) {
-            slot.prompt_clear(false);
+            slot.prompt_clear();
         }
     }
     if (impl->prompt_cache) {
